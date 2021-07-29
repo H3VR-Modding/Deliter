@@ -13,8 +13,7 @@ mkdir -p "$patchers"
 
 cp README.md Deliter/manifest.json "$tmp/"
 cp media/icon/256.png "$tmp/icon.png"
-cp Deliter/bin/Release/net35/{Deliter,Newtonsoft.Json}.dll "$patchers/"
-cp libs/YamlDotNet_UnitySubset35.dll "$patchers/YamlDotNet.dll"
+cp libs/*.dll Deliter/bin/Release/net35/{Deliter,Newtonsoft.Json,DotNetZip.dll}.dll Deliter/config.yaml "$patchers/"
 
 pushd "$tmp"
 zip -9r "$dest" .
