@@ -1,6 +1,7 @@
 ignore:
   - OtherLoader
   - WurstMod
+  - TakeAndHoldTweaker
 plugins:
   h3vr.otherloader.deli:
     guid: h3vr.otherloader
