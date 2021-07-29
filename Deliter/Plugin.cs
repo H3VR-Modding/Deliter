@@ -13,6 +13,7 @@ namespace Deliter
 	{
 		[YamlMember(Alias = "guid")]
 		public string GUID { get; set; }
+
 		public string Version { get; set; }
 		public Dictionary<string, string> Loaders { get; set; }
 	}
