@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deliter", "Deliter\Deliter.csproj", "{8DD5088E-0F31-41F8-B782-F69706EC457D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Newtonsoft.Json", "Newtonsoft.Json\Src\Newtonsoft.Json\Newtonsoft.Json.csproj", "{1AB94E73-3A7A-4DF1-8F70-E24B1DBE10F9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8DD5088E-0F31-41F8-B782-F69706EC457D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8DD5088E-0F31-41F8-B782-F69706EC457D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8DD5088E-0F31-41F8-B782-F69706EC457D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8DD5088E-0F31-41F8-B782-F69706EC457D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1AB94E73-3A7A-4DF1-8F70-E24B1DBE10F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1AB94E73-3A7A-4DF1-8F70-E24B1DBE10F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1AB94E73-3A7A-4DF1-8F70-E24B1DBE10F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1AB94E73-3A7A-4DF1-8F70-E24B1DBE10F9}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,9 @@
+ignore:
+  - OtherLoader
+  - WurstMod
+plugins:
+  h3vr.otherloader.deli:
+    guid: h3vr.otherloader
+    version: 1.0.0
+    loaders:
+      item: item
