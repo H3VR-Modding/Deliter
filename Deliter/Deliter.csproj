@@ -9,7 +9,7 @@
     <ItemGroup>
       <PackageReference Include="BepInEx.Core" Version="5.4.11" />
       <PackageReference Include="DotNetZip" Version="1.12.0" />
-      
+
       <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.2" PrivateAssets="all" />
       <PackageReference Include="Nullable" Version="1.3.0" PrivateAssets="all" />
     </ItemGroup>
@@ -32,7 +32,7 @@
         <HintPath>..\libs\I18N.West.dll</HintPath>
       </Reference>
       <Reference Include="YamlDotNet, Version=0.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e">
-        <HintPath>..\libs\YamlDotNet.dll</HintPath>
+        <HintPath>..\libs\YamlDotNet_UnitySubset35.dll</HintPath>
       </Reference>
     </ItemGroup>
 

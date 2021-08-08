@@ -1,0 +1,10 @@
+{
+  "author": "Stratum",
+  "name": "Deliter",
+  "version_number": "AUTOMATED",
+  "description": "Converts Deli mods to Stratum mods, given that their loaders have been converted.",
+  "dependencies": [
+    "Stratum-Mason-1.0.0"
+  ],
+  "website_url": "https://github.com/H3VR-Modding/Deliter"
+}
