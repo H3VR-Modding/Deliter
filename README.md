@@ -1,4 +1,7 @@
-# Deliter
+# Deliter <img src="media/icon/128.png" height="92" align="left" />
+
+[![releases](https://img.shields.io/github/v/release/H3VR-Modding/Deliter)](https://github.com/H3VR-Modding/Deliter/releases) [![chat](https://img.shields.io/discord/777351065950879744?label=chat&logo=discord&logoColor=white)](https://discord.com/invite/g8xeFyt42j)
+
 Converts Deli mods to Stratum mods, given that their loaders have been converted. The resulting Mason project is safe to pack and upload without intervention.
 
 ## Installation
