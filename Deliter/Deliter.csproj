@@ -32,7 +32,7 @@
         <HintPath>..\libs\I18N.West.dll</HintPath>
       </Reference>
       <Reference Include="YamlDotNet, Version=0.0.0.0, Culture=neutral, PublicKeyToken=ec19458f3c15af5e">
-        <HintPath>..\libs\YamlDotNet_UnitySubset35.dll</HintPath>
+        <HintPath>..\libs\YamlDotNet.dll</HintPath>
       </Reference>
     </ItemGroup>
 
