@@ -15,11 +15,16 @@ namespace Deliter
 {
 	internal class Converter
 	{
-		private static JsonSerializationException NewException(JToken token, string message)
+		private static JsonSerializationException NewJsonException(JToken token, string message)
 		{
 			IJsonLineInfo info = token;
 
 			return new JsonSerializationException(message, token.Path, info.LineNumber, info.LinePosition, null);
+		}
+
+		private static UnconvertableException NewUnconvertableException(JToken token, string message)
+		{
+			return new UnconvertableException(NewJsonException(token, message));
 		}
 
 		private static JObject ReadManifest(ZipEntry entry)
@@ -100,11 +105,11 @@ namespace Deliter
 		private YamlNode? ConvertAsset(JProperty asset)
 		{
 			if (asset is not {Name: { } path, Value: JValue {Value: string rawLoader}})
-				throw NewException(asset, "Invalid asset");
+				throw NewJsonException(asset, "Invalid asset");
 
 			string[] split = rawLoader.Split(':');
 			if (split.Length != 2)
-				throw NewException(asset, "Loaders must be a mod GUID and loader name, separated by a single colon");
+				throw NewJsonException(asset, "Loaders must be a mod GUID and loader name, separated by a single colon");
 
 			// Ignore. This will be loaded by BepInEx, if applicable
 			if (split[0] == "deli" && split[1] == "assembly")
@@ -112,11 +117,11 @@ namespace Deliter
 
 			string plugin = split[0];
 			if (!_config.Plugins.TryGetValue(plugin, out Plugin convPlugin))
-				throw NewException(asset, "Mod contained a loader from an unknown plugin: " + plugin);
+				throw NewUnconvertableException(asset, "Mod contained a loader from an unknown plugin: " + plugin);
 
 			string loader = split[1];
 			if (!convPlugin.Loaders.TryGetValue(loader, out string convLoader))
-				throw NewException(asset, "Mod contained a loader that is no longer available: " + loader);
+				throw NewUnconvertableException(asset, "Mod contained a loader that is no longer available: " + loader);
 
 			return new YamlMappingNode
 			{
@@ -149,10 +154,10 @@ namespace Deliter
 					"hard", new YamlMappingNode(dependencies.Properties().Select(dependency =>
 					{
 						if (dependency is not {Name: { } plugin, Value: JValue {Value: string}})
-							throw NewException(dependency, "Invalid dependency");
+							throw NewJsonException(dependency, "Invalid dependency");
 
 						if (!_config.Plugins.TryGetValue(plugin, out Plugin convPlugin))
-							throw NewException(dependency, "Unknown plugin: " + convPlugin);
+							throw NewUnconvertableException(dependency, "Unknown plugin: " + plugin);
 
 						return new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(convPlugin.GUID),
 							new YamlScalarNode(convPlugin.Version));
@@ -166,7 +171,7 @@ namespace Deliter
 			YamlMappingNode convAssets = new();
 
 			if (assets["patcher"] is JObject {HasValues: true} patcher)
-				throw NewException(patcher, "Mod contained patcher assets. Patcher assets are not supported in Stratum.");
+				throw NewUnconvertableException(patcher, "Mod contained patcher assets. Patcher assets are not supported in Stratum.");
 
 			if (assets["setup"] is JObject setup)
 				convAssets.Add("setup", new YamlSequenceNode(setup.Properties().Select(ConvertAsset).WhereNotNull()));
@@ -311,9 +316,13 @@ namespace Deliter
 			{
 				Convert(mod);
 			}
+			catch (UnconvertableException e)
+			{
+				_logger.LogWarning($"'{name}' is unconvertable. This is OK for mods that use loaders not yet ported to Stratum:\n{e.InnerException}");
+			}
 			catch (Exception e)
 			{
-				_logger.LogError($"Could not convert '{name}':\n{e}");
+				_logger.LogError($"'{name}' has an error in its format:\n{e}");
 			}
 
 			_logger.LogInfo($"Converted '{name}' to a Mason project");

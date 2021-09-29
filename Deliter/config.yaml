@@ -9,3 +9,5 @@ plugins:
     version: 1.0.0
     loaders:
       item: item
+      item_unordered: item_unordered
+      item_last: item_last
