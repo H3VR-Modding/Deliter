@@ -312,17 +312,28 @@ namespace Deliter
 				return;
 			}
 
+			static string? FormatException(Exception? e)
+			{
+				if (e is UnconvertableException ue)
+					return FormatException(ue.InnerException);
+
+				if (e is JsonSerializationException je)
+					return $"At ({je.LineNumber}, {je.LinePosition}) ({je.Path}), {je}";
+
+				return e?.ToString();
+			}
+
 			try
 			{
 				Convert(mod);
 			}
 			catch (UnconvertableException e)
 			{
-				_logger.LogWarning($"'{name}' is unconvertable. This is OK for mods that use loaders not yet ported to Stratum:\n{e.InnerException}");
+				_logger.LogWarning($"'{name}' is unconvertable. This is OK for mods that use loaders not yet ported to Stratum:\n{FormatException(e)}");
 			}
 			catch (Exception e)
 			{
-				_logger.LogError($"'{name}' has an error in its format:\n{e}");
+				_logger.LogError($"'{name}' has an error in its format:\n{FormatException(e)}");
 			}
 
 			_logger.LogInfo($"Converted '{name}' to a Mason project");
