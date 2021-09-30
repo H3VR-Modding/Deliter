@@ -253,7 +253,7 @@ namespace Deliter
 		{
 			// So we don't run again next launch
 			// Don't delete the file to prevent someone who spent their lifetime on a mod but didn't make any backups from getting pissed
-			File.Move(path, partial ? PartiallyDeleted : Path.ChangeExtension(path, "delite_this"));
+			File.Move(path, partial ? Path.Combine(directory, PartiallyDeleted) : Path.ChangeExtension(path, "delite_this"));
 
 			const string manifestName = "manifest.json";
 			File.Delete(Path.Combine(resources, manifestName));
@@ -304,15 +304,20 @@ namespace Deliter
 					string entryName = entry.FileName;
 					zip.RemoveEntry(entry);
 
-					using MemoryStream memory = new();
+					byte[] raw;
 					{
-						using StreamWriter text = new(memory);
-						using JsonTextWriter writer = new(text);
+						using MemoryStream memory = new();
 
-						manifest.WriteTo(writer);
+						using (StreamWriter text = new(memory))
+						using (JsonTextWriter writer = new(text))
+							manifest.WriteTo(writer);
+
+						raw = memory.ToArray();
 					}
 
-					zip.AddEntry(entryName, memory);
+					zip.AddEntry(entryName, raw);
+
+					zip.Save();
 				}
 			}
 
