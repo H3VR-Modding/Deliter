@@ -15,16 +15,11 @@ namespace Deliter
 {
 	internal class Converter
 	{
-		private static JsonSerializationException NewJsonException(JToken token, string message)
+		private static JsonSerializationException NewException(JToken token, string message)
 		{
 			IJsonLineInfo info = token;
 
 			return new JsonSerializationException(message, token.Path, info.LineNumber, info.LinePosition, null);
-		}
-
-		private static UnconvertableException NewUnconvertableException(JToken token, string message)
-		{
-			return new UnconvertableException(NewJsonException(token, message));
 		}
 
 		private static JObject ReadManifest(ZipEntry entry)
@@ -105,23 +100,27 @@ namespace Deliter
 		private YamlNode? ConvertAsset(JProperty asset)
 		{
 			if (asset is not {Name: { } path, Value: JValue {Value: string rawLoader}})
-				throw NewJsonException(asset, "Invalid asset");
+				throw NewException(asset, "Invalid asset");
 
 			string[] split = rawLoader.Split(':');
 			if (split.Length != 2)
-				throw NewJsonException(asset, "Loaders must be a mod GUID and loader name, separated by a single colon");
+				throw NewException(asset, "Loaders must be a mod GUID and loader name, separated by a single colon");
 
-			// Ignore. This will be loaded by BepInEx, if applicable
 			if (split[0] == "deli" && split[1] == "assembly")
+				// Ignore. This will be loaded by BepInEx, if applicable
 				return null;
 
 			string plugin = split[0];
 			if (!_config.Plugins.TryGetValue(plugin, out Plugin convPlugin))
-				throw NewUnconvertableException(asset, "Mod contained a loader from an unknown plugin: " + plugin);
+				// Mod contained a loader from an unknown plugin
+				return null;
 
 			string loader = split[1];
 			if (!convPlugin.Loaders.TryGetValue(loader, out string convLoader))
-				throw NewUnconvertableException(asset, "Mod contained a loader that is no longer available: " + loader);
+				// Mod contained a loader that is no longer available
+				return null;
+
+			asset.Remove();
 
 			return new YamlMappingNode
 			{
@@ -148,20 +147,26 @@ namespace Deliter
 
 		private YamlMappingNode GetDependencies(JObject dependencies)
 		{
-			return new()
+			YamlMappingNode mapping = new();
+
+			foreach (JProperty property in dependencies.Properties().ToList())
+			{
+				if (property is not {Name: { } plugin, Value: JValue {Value: string}})
+					throw NewException(property, "Invalid dependency");
+
+				if (!_config.Plugins.TryGetValue(plugin, out Plugin convPlugin))
+					// Unknown plugin
+					continue;
+
+				property.Remove();
+
+				mapping.Add(new YamlScalarNode(convPlugin.GUID), new YamlScalarNode(convPlugin.Version));
+			}
+
+			return new YamlMappingNode
 			{
 				{
-					"hard", new YamlMappingNode(dependencies.Properties().Select(dependency =>
-					{
-						if (dependency is not {Name: { } plugin, Value: JValue {Value: string}})
-							throw NewJsonException(dependency, "Invalid dependency");
-
-						if (!_config.Plugins.TryGetValue(plugin, out Plugin convPlugin))
-							throw NewUnconvertableException(dependency, "Unknown plugin: " + plugin);
-
-						return new KeyValuePair<YamlNode, YamlNode>(new YamlScalarNode(convPlugin.GUID),
-							new YamlScalarNode(convPlugin.Version));
-					}))
+					"hard", mapping
 				}
 			};
 		}
@@ -171,17 +176,17 @@ namespace Deliter
 			YamlMappingNode convAssets = new();
 
 			if (assets["patcher"] is JObject {HasValues: true} patcher)
-				throw NewUnconvertableException(patcher, "Mod contained patcher assets. Patcher assets are not supported in Stratum.");
+				throw NewException(patcher, "Mod contained patcher assets. Patcher assets are not supported in Stratum.");
 
 			if (assets["setup"] is JObject setup)
-				convAssets.Add("setup", new YamlSequenceNode(setup.Properties().Select(ConvertAsset).WhereNotNull()));
+				convAssets.Add("setup", new YamlSequenceNode(setup.Properties().ToList().Select(ConvertAsset).WhereNotNull()));
 
 			if (assets["runtime"] is JObject runtime)
 				convAssets.Add("runtime", new YamlMappingNode
 				{
 					{
-						"nested", new YamlSequenceNode(runtime.Properties().Select(x => ConvertAsset(x) is { } asset
-							? (YamlNode) new YamlMappingNode
+						"nested", new YamlSequenceNode(runtime.Properties().ToList().Select(ConvertAsset).WhereNotNull().Select(asset =>
+							(YamlNode)new YamlMappingNode
 							{
 								{
 									"assets", new YamlSequenceNode
@@ -189,17 +194,17 @@ namespace Deliter
 										asset
 									}
 								}
-							}
-							: null
-						).WhereNotNull())
+							}))
 					}
 				});
 
 			return convAssets;
 		}
 
-		private YamlDocument GetDocument(JObject manifest)
+		private YamlDocument GetDocument(JObject manifest, out bool partial)
 		{
+			partial = false;
+
 			YamlMappingNode root = new()
 			{
 				{
@@ -208,18 +213,26 @@ namespace Deliter
 			};
 
 			if (manifest["dependencies"] is JObject dependencies)
+			{
 				root.Add("dependencies", GetDependencies(dependencies));
 
+				partial = partial || dependencies.Count != 0;
+			}
+
 			if (manifest["assets"] is JObject assets)
+			{
 				root.Add("assets", GetAssets(assets));
+
+				partial = partial || assets.Count != 0;
+			}
 
 			return new YamlDocument(root);
 		}
 
-		private void WriteProject(string directory, JObject manifest)
+		private void WriteProject(string directory, JObject manifest, out bool partial)
 		{
 			{
-				YamlStream project = new(GetDocument(manifest));
+				YamlStream project = new(GetDocument(manifest, out partial));
 
 				using StreamWriter text = new(Path.Combine(directory, "project.yaml"), false, Utility.UTF8NoBom);
 
@@ -234,11 +247,13 @@ namespace Deliter
 			_masonConfig.Save(text, false);
 		}
 
-		private void Cleanup(string path, string directory, string resources)
+		private const string PartiallyDeleted = "partially_delited.deli";
+
+		private void Cleanup(string path, string directory, string resources, bool partial)
 		{
 			// So we don't run again next launch
 			// Don't delete the file to prevent someone who spent their lifetime on a mod but didn't make any backups from getting pissed
-			File.Move(path, Path.ChangeExtension(path, "delite_this"));
+			File.Move(path, partial ? PartiallyDeleted : Path.ChangeExtension(path, "delite_this"));
 
 			const string manifestName = "manifest.json";
 			File.Delete(Path.Combine(resources, manifestName));
@@ -258,14 +273,18 @@ namespace Deliter
 			} while (files.MoveNext());
 		}
 
-		private void Convert(string path)
+		private bool Convert(string path)
 		{
-			string directory = Path.GetDirectoryName(path)!;
+			// TODO: Redo partial mods (in case other loaders are converted after the first conversion)
+			if (Path.GetFileName(path) == PartiallyDeleted)
+				return false;
 
+			string directory = Path.GetDirectoryName(path)!;
 			string resources = Path.Combine(directory, "resources");
 			if (Directory.Exists(resources))
 				throw new IOException("Resources directory is already in use");
 
+			bool partial;
 			using (ZipFile zip = ZipFile.Read(path))
 			{
 				const string manifestName = "manifest.json";
@@ -274,12 +293,32 @@ namespace Deliter
 
 				JObject manifest = ReadManifest(entry);
 				CheckForDeliDlls(zip);
-				WriteProject(directory, manifest);
+				WriteProject(directory, manifest, out partial);
 				WriteConfig(directory);
 				ExtractResources(resources, zip);
+
+				if (partial)
+				{
+					// Readjust manifest
+
+					string entryName = entry.FileName;
+					zip.RemoveEntry(entry);
+
+					using MemoryStream memory = new();
+					{
+						using StreamWriter text = new(memory);
+						using JsonTextWriter writer = new(text);
+
+						manifest.WriteTo(writer);
+					}
+
+					zip.AddEntry(entryName, memory);
+				}
 			}
 
-			Cleanup(path, directory, resources);
+			Cleanup(path, directory, resources, partial);
+
+			return true;
 		}
 
 		public void PreCompile(string directory)
@@ -312,31 +351,24 @@ namespace Deliter
 				return;
 			}
 
-			static string? FormatException(Exception? e)
-			{
-				if (e is UnconvertableException ue)
-					return FormatException(ue.InnerException);
-
-				if (e is JsonSerializationException je)
-					return $"At ({je.LineNumber}, {je.LinePosition}) ({je.Path}), {je}";
-
-				return e?.ToString();
-			}
-
+			bool success;
 			try
 			{
-				Convert(mod);
+				success = Convert(mod);
 			}
-			catch (UnconvertableException e)
+			catch (JsonSerializationException e)
 			{
-				_logger.LogWarning($"'{name}' is unconvertable. This is OK for mods that use loaders not yet ported to Stratum:\n{FormatException(e)}");
+				_logger.LogError($"At ({e.LineNumber}, {e.LinePosition}) ({e.Path}), {e}");
+				return;
 			}
 			catch (Exception e)
 			{
-				_logger.LogError($"'{name}' has an error in its format:\n{FormatException(e)}");
+				_logger.LogError($"'{name}' has an error in its format:\n{e}");
+				return;
 			}
 
-			_logger.LogInfo($"Converted '{name}' to a Mason project");
+			if (success)
+				_logger.LogInfo($"Converted '{name}' to a Mason project");
 		}
 	}
 }
