@@ -5,7 +5,6 @@ using System.Linq;
 using BepInEx;
 using BepInEx.Logging;
 using Ionic.Zip;
-using Mono.Cecil;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using YamlDotNet.Core;
@@ -15,6 +14,78 @@ namespace Deliter
 {
 	internal class Converter
 	{
+		private const string ManifestJson = "manifest.json";
+
+		private static void Add(YamlNode existing, YamlNode additive)
+		{
+			static void Mismatch()
+			{
+				throw new ArgumentException("Existing and additive are not the same type");
+			}
+
+			switch (existing)
+			{
+				case YamlMappingNode lhs:
+					switch (additive)
+					{
+						case YamlMappingNode rhs:
+							Add(lhs, rhs);
+							break;
+						default:
+							Mismatch();
+							break;
+					}
+					break;
+
+				case YamlSequenceNode lhs:
+					switch (additive)
+					{
+						case YamlSequenceNode rhs:
+							Add(lhs, rhs);
+							break;
+						default:
+							Mismatch();
+							break;
+					}
+					break;
+
+				case YamlScalarNode lhs:
+					switch (additive)
+					{
+						case YamlScalarNode rhs:
+							lhs.Value = rhs.Value;
+							break;
+						default:
+							Mismatch();
+							break;
+					}
+					break;
+
+				default:
+					throw new ArgumentException("Unknown type", nameof(existing));
+			}
+		}
+
+		private static void Add(YamlSequenceNode existing, YamlSequenceNode additive)
+		{
+			foreach (YamlNode node in additive)
+				existing.Add(node);
+		}
+
+		private static void Add(YamlMappingNode existing, YamlMappingNode additive)
+		{
+			foreach (KeyValuePair<YamlNode, YamlNode> pair in additive)
+			{
+				YamlScalarNode key = (YamlScalarNode) pair.Key;
+				YamlNode value = pair.Value;
+
+				if (existing.FirstOrDefault(x => x.Key is YamlScalarNode scalar && scalar.Value == key.Value).Value is { } current)
+					Add(current, value);
+				else
+					existing.Add(key, value);
+			}
+		}
+
 		private static JsonSerializationException NewException(JToken token, string message)
 		{
 			IJsonLineInfo info = token;
@@ -31,39 +102,65 @@ namespace Deliter
 			return JObject.Load(json);
 		}
 
-		private static void CheckForDeliDlls(ZipFile zip)
+		private static void CreateAllDirectories(string path)
 		{
-			foreach (ZipEntry entry in zip.Entries)
-			{
-				string fileName = entry.FileName;
-				if (Path.GetExtension(fileName) != ".dll")
-					continue;
+			if (Path.GetDirectoryName(path) is { } parent && !Directory.Exists(parent))
+				CreateAllDirectories(parent);
 
-				var buffer = new byte[(int) entry.UncompressedSize];
-
-				using Stream raw = entry.OpenReader();
-				raw.Read(buffer, 0, buffer.Length);
-
-				using MemoryStream seekable = new(buffer);
-				using ModuleDefinition module = ModuleDefinition.ReadModule(seekable);
-
-				foreach (AssemblyNameReference reference in module.AssemblyReferences)
-				{
-					string name = reference.Name;
-					if (name is not "Deli.Patcher" or "Deli.Setup")
-						continue;
-
-					throw new InvalidOperationException($"Assembly located at {entry.FileName} contains a reference to Deli ({name})");
-				}
-			}
+			Directory.CreateDirectory(path);
 		}
 
-		private static void ExtractResources(string resources, ZipFile zip)
+		private void ExtractResources(string resources, ZipFile zip)
 		{
 			Directory.CreateDirectory(resources);
 			try
 			{
-				zip.ExtractAll(resources);
+				foreach (ZipEntry entry in zip.Entries)
+				{
+					string name = entry.FileName;
+					string path = Path.Combine(resources, name);
+
+					if (entry.IsDirectory)
+					{
+						CreateAllDirectories(path);
+					}
+					else
+					{
+						void ExtractFile()
+						{
+							using FileStream file = new(path, FileMode.Create, FileAccess.Write, FileShare.None);
+
+							entry.Extract(file);
+						}
+
+						if (Path.GetFileName(name) == ManifestJson)
+						{
+							bool isRootManifest = string.IsNullOrEmpty(Path.GetDirectoryName(name)?.Trim());
+
+							if (isRootManifest)
+							{
+								// Ignore it. All Deli files have one
+							}
+							else
+							{
+								// This could break something, so warn
+								LogWarning($"Ignoring non-Deli manifest from '{zip}' to avoid Deli crashing: '{name}'");
+							}
+						}
+						else if (File.Exists(path))
+						{
+							if (File.GetLastWriteTime(path) < entry.LastModified)
+								ExtractFile();
+						}
+						else
+						{
+							if (Path.GetDirectoryName(path) is { } parent)
+								CreateAllDirectories(parent);
+
+							ExtractFile();
+						}
+					}
+				}
 			}
 			catch (Exception e)
 			{
@@ -229,12 +326,26 @@ namespace Deliter
 			return new YamlDocument(root);
 		}
 
-		private void WriteProject(string directory, JObject manifest, out bool partial)
+		private void WriteProject(string path, JObject manifest, out bool partial)
 		{
-			{
-				YamlStream project = new(GetDocument(manifest, out partial));
+			YamlStream project = new();
 
-				using StreamWriter text = new(Path.Combine(directory, "project.yaml"), false, Utility.UTF8NoBom);
+			if (File.Exists(path))
+			{
+				using StreamReader text = new(path);
+
+				project.Load(text);
+			}
+
+			YamlDocument doc = GetDocument(manifest, out partial);
+
+			if (project.Documents.FirstOrDefault() is { } existing)
+				Add(existing.RootNode, doc.RootNode);
+			else
+				project.Add(doc);
+
+			{
+				using StreamWriter text = new(path, false, Utility.UTF8NoBom);
 
 				project.Save(text, false);
 			}
@@ -247,53 +358,32 @@ namespace Deliter
 			_masonConfig.Save(text, false);
 		}
 
-		private const string PartiallyDeleted = "partially_delited.deli";
-
-		private void Cleanup(string path, string directory, string resources, bool partial)
+		private void Convert(string path, string name)
 		{
-			// So we don't run again next launch
-			// Don't delete the file to prevent someone who spent their lifetime on a mod but didn't make any backups from getting pissed
-			File.Move(path, partial ? Path.Combine(directory, PartiallyDeleted) : Path.ChangeExtension(path, "delite_this"));
-
-			const string manifestName = "manifest.json";
-			File.Delete(Path.Combine(resources, manifestName));
-
-			using IEnumerator<string> files = ((IEnumerable<string>) Directory.GetFiles(resources, manifestName, SearchOption.AllDirectories)).GetEnumerator();
-			if (!files.MoveNext())
-				return;
-
-			string name = Path.GetFileName(directory);
-
-			do
-			{
-				string manifest = files.Current!;
-
-				File.Delete(manifest);
-				_logger.LogWarning($"Deleted non-Deli manifest from '{name}' to avoid Deli crashing: '{manifest}'");
-			} while (files.MoveNext());
-		}
-
-		private bool Convert(string path)
-		{
-			// TODO: Redo partial mods (in case other loaders are converted after the first conversion)
-			if (Path.GetFileName(path) == PartiallyDeleted)
-				return false;
-
 			string directory = Path.GetDirectoryName(path)!;
+			string project = Path.Combine(directory, "project.yaml");
+			if (File.Exists(project) && File.GetLastWriteTimeUtc(path) <= File.GetLastWriteTimeUtc(project))
+			{
+				LogDebug($"Skipping '{path}' because the project.yaml was editted last");
+				return;
+			}
+
 			string resources = Path.Combine(directory, "resources");
-			if (Directory.Exists(resources))
-				throw new IOException("Resources directory is already in use");
+
+			// Don't delete the file to prevent someone who spent their lifetime on a mod but didn't make any backups from getting pissed
+			// Ignore if backup already exists because this might be a partially delited mod.
+			string backupPath = path + ".bak";
+			if (!File.Exists(backupPath))
+				File.Copy(path, backupPath, true);
 
 			bool partial;
 			using (ZipFile zip = ZipFile.Read(path))
 			{
-				const string manifestName = "manifest.json";
-				if (zip[manifestName] is not { } entry)
-					throw new InvalidOperationException("Mod contained no " + manifestName);
+				if (zip[ManifestJson] is not { } entry)
+					throw new InvalidOperationException("Mod contained no " + ManifestJson);
 
 				JObject manifest = ReadManifest(entry);
-				CheckForDeliDlls(zip);
-				WriteProject(directory, manifest, out partial);
+				WriteProject(project, manifest, out partial);
 				WriteConfig(directory);
 				ExtractResources(resources, zip);
 
@@ -308,9 +398,12 @@ namespace Deliter
 					{
 						using MemoryStream memory = new();
 
-						using (StreamWriter text = new(memory))
-						using (JsonTextWriter writer = new(text))
+						{
+							using StreamWriter text = new(memory);
+							using JsonTextWriter writer = new(text);
+
 							manifest.WriteTo(writer);
+						}
 
 						raw = memory.ToArray();
 					}
@@ -321,15 +414,19 @@ namespace Deliter
 				}
 			}
 
-			Cleanup(path, directory, resources, partial);
+			if (!partial)
+				// So we don't run again next launch
+				File.Delete(path);
+			else
+				File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(project));
 
-			return true;
+			LogInfo($"Converted '{name}' to a Mason project");
 		}
 
 		public void PreCompile(string directory)
 		{
 			// Ensure it is a TS package
-			if (!File.Exists(Path.Combine(directory, "manifest.json")))
+			if (!File.Exists(Path.Combine(directory, ManifestJson)))
 				return;
 
 			// Ignore package if the name is listed as ignorable
@@ -337,7 +434,7 @@ namespace Deliter
 			string[] split = name.Split('-');
 			if (split.Length == 2 && _config.Ignore.Contains(split[1]))
 			{
-				_logger.LogDebug($"Ignoring '{name}' because it is in the ignore filter");
+				LogDebug($"Ignoring '{name}' because it is in the ignore filter");
 				return;
 			}
 
@@ -352,28 +449,54 @@ namespace Deliter
 
 			if (mods.MoveNext())
 			{
-				_logger.LogWarning($"'{name}' contained multiple .deli files. Skipping");
+				LogWarning($"'{name}' contained multiple .deli files. Skipping");
 				return;
 			}
 
-			bool success;
 			try
 			{
-				success = Convert(mod);
+				Convert(mod, name);
 			}
 			catch (JsonSerializationException e)
 			{
-				_logger.LogError($"At ({e.LineNumber}, {e.LinePosition}) ({e.Path}), {e}");
-				return;
+				LogError($"At ({e.LineNumber}, {e.LinePosition}) ({e.Path}), {e}");
 			}
 			catch (Exception e)
 			{
-				_logger.LogError($"'{name}' has an error in its format:\n{e}");
-				return;
+				LogError($"'{name}' has an error in its format:\n{e}");
 			}
+		}
 
-			if (success)
-				_logger.LogInfo($"Converted '{name}' to a Mason project");
+		private void LogInfo(object obj)
+		{
+			lock (_logger)
+			{
+				_logger.LogInfo(obj);
+			}
+		}
+
+		private void LogWarning(object obj)
+		{
+			lock (_logger)
+			{
+				_logger.LogWarning(obj);
+			}
+		}
+
+		private void LogError(object obj)
+		{
+			lock (_logger)
+			{
+				_logger.LogError(obj);
+			}
+		}
+
+		private void LogDebug(object obj)
+		{
+			lock (_logger)
+			{
+				_logger.LogDebug(obj);
+			}
 		}
 	}
 }

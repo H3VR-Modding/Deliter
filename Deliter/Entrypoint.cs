@@ -1,8 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using BepInEx;
 using BepInEx.Logging;
 using Mono.Cecil;
@@ -42,8 +44,36 @@ namespace Deliter
 		{
 			Converter converter = new(Logger, ReadConfig());
 
-			foreach (string directory in Directory.GetDirectories(Paths.PluginPath))
-				converter.PreCompile(directory);
+			string[] directories = Directory.GetDirectories(Paths.PluginPath);
+			var completions = new bool[directories.Length];
+			for (int i = 0; i < directories.Length; ++i)
+			{
+				string directory = directories[i];
+				int iCopy = i;
+
+				ThreadPool.QueueUserWorkItem(_ =>
+				{
+					try
+					{
+						converter.PreCompile(directory);
+						completions[iCopy] = true;
+					}
+					catch (Exception e)
+					{
+						Logger.LogError($"Failed to run precompile method on threadpool:\n{e}");
+					}
+				});
+			}
+
+			// Optimized (because this will run quite a few times) form of:
+			// while (!completions.All(x => x))
+			// 	Thread.Sleep(10);
+			Sleep:
+			Thread.Sleep(10);
+
+			foreach (bool item in completions)
+				if (!item)
+					goto Sleep;
 		}
 	}
 }
