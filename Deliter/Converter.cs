@@ -362,11 +362,6 @@ namespace Deliter
 		{
 			string directory = Path.GetDirectoryName(path)!;
 			string project = Path.Combine(directory, "project.yaml");
-			if (File.Exists(project) && File.GetLastWriteTimeUtc(path) <= File.GetLastWriteTimeUtc(project))
-			{
-				LogDebug($"Skipping '{path}' because the project.yaml was editted last");
-				return;
-			}
 
 			string resources = Path.Combine(directory, "resources");
 
@@ -417,8 +412,6 @@ namespace Deliter
 			if (!partial)
 				// So we don't run again next launch
 				File.Delete(path);
-			else
-				File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(project));
 
 			LogInfo($"Converted '{name}' to a Mason project");
 		}
