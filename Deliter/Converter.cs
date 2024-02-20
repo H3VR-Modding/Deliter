@@ -361,15 +361,28 @@ namespace Deliter
 		private void Convert(string path, string name)
 		{
 			string directory = Path.GetDirectoryName(path)!;
+			string backupPath = path + ".bak";
 			string project = Path.Combine(directory, "project.yaml");
+			string backupProject = project + ".bak";
 
 			string resources = Path.Combine(directory, "resources");
 
-			// Don't delete the file to prevent someone who spent their lifetime on a mod but didn't make any backups from getting pissed
-			// Ignore if backup already exists because this might be a partially delited mod.
-			string backupPath = path + ".bak";
-			if (!File.Exists(backupPath))
-				File.Copy(path, backupPath, true);
+			// Detect previous failed conversion attempts
+			// This is due to a bug that would crash halfway through conversion
+
+			if (File.Exists(path) && File.Exists(backupPath)) {
+				// Delete all info from previous failed attempts
+				File.Delete(Path.Combine(directory, "bootstrap.dll"));
+				File.Delete(project);
+				File.Delete(backupProject);
+				// The original deli has been modified, so we must replace the broken .deli with the .deli.bak
+				// And delete the .deli.bak so it knows to convert it
+				File.Copy(backupPath, path, true);
+				File.Delete(backupPath);
+				Directory.Delete(Path.Combine(directory, "resources"), true);
+			}
+
+			// Convert to Mason
 
 			bool partial;
 			using (ZipFile zip = ZipFile.Read(path))
@@ -378,6 +391,11 @@ namespace Deliter
 					throw new InvalidOperationException("Mod contained no " + ManifestJson);
 
 				JObject manifest = ReadManifest(entry);
+				if (File.Exists(project)) {
+					File.Copy(project, backupProject, true);
+					File.Delete(project);
+				}
+
 				WriteProject(project, manifest, out partial);
 				WriteConfig(directory);
 				ExtractResources(resources, zip);
@@ -409,9 +427,13 @@ namespace Deliter
 				}
 			}
 
-			if (!partial)
-				// So we don't run again next launch
+			// Don't delete the file to prevent someone who spent their lifetime on a mod but didn't make any backups from getting pissed
+			// Ignore if backup already exists because this might be a partially delited mod.
+
+			if (!File.Exists(backupPath)) {
+				File.Copy(path, backupPath, true);
 				File.Delete(path);
+			}
 
 			LogInfo($"Converted '{name}' to a Mason project");
 		}
