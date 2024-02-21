@@ -362,8 +362,10 @@ namespace Deliter
 		{
 			string directory = Path.GetDirectoryName(path)!;
 			string backupPath = path + ".bak";
+			string backupPartialPath = path + ".partial.bak";
 			string project = Path.Combine(directory, "project.yaml");
 			string backupProject = project + ".bak";
+
 
 			string resources = Path.Combine(directory, "resources");
 
@@ -431,8 +433,15 @@ namespace Deliter
 			// Ignore if backup already exists because this might be a partially delited mod.
 
 			if (!File.Exists(backupPath)) {
-				File.Copy(path, backupPath, true);
-				File.Delete(path);
+				// If the mod still has some existing dependencies in deli, don't delete the deli.
+				// Rename mod to .deli.bak.partial so that it doesn't run previous fixes for bugs.
+				if (partial) {
+					File.Copy(path, backupPartialPath, true);
+				}
+				else {
+					File.Copy(path, backupPath, true);
+					File.Delete(path);
+				}
 			}
 
 			LogInfo($"Converted '{name}' to a Mason project");
